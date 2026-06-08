@@ -24,38 +24,47 @@ def lookup_plant(plant_name: str) -> dict:
     """
     Search the plant database for a plant by name and return its care information.
 
-    TODO — Milestone 1:
+    Matches against (in order):
+      1. Direct slug key (e.g., "pothos", "snake_plant")
+      2. Display name (e.g., "Pothos")
+      3. Aliases (e.g., "devil's ivy", "sansevieria")
 
-    Right now this always returns a "not found" response. Your job is to implement
-    the search logic so it can actually find plants.
-
-    The plant database (_plant_db) is a dict where keys are lowercase slugs like
-    "pothos", "snake_plant", "fiddle_leaf_fig". Each plant also has a "display_name"
-    field and an "aliases" list with common alternate names.
-
-    Your implementation should handle all three:
-      1. Direct key match (e.g., "pothos" → finds "pothos")
-      2. Display name match (e.g., "Pothos" → finds "pothos")
-      3. Alias match (e.g., "devil's ivy" → finds "pothos")
-
-    All matching should be case-insensitive. Strip whitespace from the input.
+    All matching is case-insensitive with whitespace stripped.
 
     Return format when found:
       {"found": True, "plant": <the full plant dict>}
 
     Return format when not found:
       {"found": False, "name": <original input>, "message": <helpful string>}
-
-    The message in the not-found case matters — the agent will use it to decide
-    what to tell the user. Your spec has a dedicated field for this — think about
-    what information would actually be helpful to the agent.
-
-    Before writing code, complete the lookup_plant section of specs/tool-functions-spec.md.
     """
+    normalized = plant_name.strip().lower()
+
+    # 1. Direct slug key match
+    if normalized in _plant_db:
+        return {"found": True, "plant": _plant_db[normalized]}
+
+    # 2. Display name match
+    for key, plant in _plant_db.items():
+        if plant["display_name"].lower() == normalized:
+            return {"found": True, "plant": plant}
+
+    # 3. Alias match
+    for key, plant in _plant_db.items():
+        if normalized in [alias.lower() for alias in plant.get("aliases", [])]:
+            return {"found": True, "plant": plant}
+
     return {
         "found": False,
         "name": plant_name,
-        "message": "Plant lookup not yet implemented. Complete Milestone 1.",
+        "message": (
+            f"No plant matching '{plant_name}' was found in the database. "
+            "The database contains common houseplants like pothos, monstera, snake plant, "
+            "ZZ plant, peace lily, aloe vera, philodendron, calathea, orchid, fiddle leaf fig, "
+            "rubber plant, boston fern, spider plant, chinese evergreen, and succulents. "
+            "Acknowledge that this specific plant is not in the database. Offer general care "
+            "advice based on the plant type (tropical, succulent, fern, etc.) if you can infer "
+            "it from the name — but do not invent specific data as if it came from the database."
+        ),
     }
 
 

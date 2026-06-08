@@ -7,11 +7,6 @@ _client = Groq(api_key=GROQ_API_KEY)
 
 # ──────────────────────────────────────────────
 # Tool definitions
-#
-# These are the schemas that tell the LLM what tools are available and how to
-# call them. The LLM reads these descriptions and decides when (and how) to use
-# each tool. They're already complete — your job is to implement the tool
-# functions in tools.py and the agent loop below.
 # ──────────────────────────────────────────────
 
 TOOL_DEFINITIONS = [
@@ -69,18 +64,17 @@ SYSTEM_PROMPT = (
     "Help users care for their houseplants by looking up specific plant information "
     "and current seasonal conditions using your available tools.\n\n"
     "Always use your tools to look up plant-specific information before answering — "
-    "don't rely on your general knowledge alone. If a plant isn't in your database, "
-    "say so clearly and offer general guidance based on what the user describes.\n\n"
+    "don't rely on your general knowledge alone.\n\n"
+    "When lookup_plant returns found=False, do NOT invent specific care instructions "
+    "for that plant. Instead: clearly acknowledge the plant is not in your database, "
+    "then offer general guidance based on the plant type (tropical, succulent, fern, etc.) "
+    "if you can reasonably infer it. Make clear which parts are general advice vs. database data.\n\n"
     "Keep your advice practical and specific. Cite the source of your information "
     "when you have it (e.g., 'According to the care data for your monstera...')."
 )
 
 # ──────────────────────────────────────────────
 # Tool dispatch
-#
-# This is already complete. It routes tool calls from the LLM to the actual
-# Python functions in tools.py, and returns results as JSON strings (which is
-# what the Groq API expects for tool results).
 # ──────────────────────────────────────────────
 
 def dispatch_tool(tool_name: str, tool_args: dict) -> str:
@@ -104,28 +98,55 @@ def run_agent(user_message: str, history: list) -> str:
     """
     Run the plant care agent for one user turn and return its response.
 
-    TODO — Milestone 2:
-
-    The agent loop follows a specific pattern that you'll implement here. Read
-    specs/agent-loop-spec.md carefully before writing any code — understand the
-    full loop before implementing any part of it.
-
-    The loop works like this:
-      1. Build a messages list: system prompt + conversation history + new user message
-      2. Call the LLM with messages and TOOL_DEFINITIONS
-      3. If the response contains tool_calls:
-           a. Append the assistant message (with tool_calls) to messages
-           b. For each tool call: execute via dispatch_tool(), append the result
-           c. Call the LLM again with the updated messages
-           d. Repeat until no more tool_calls (or MAX_TOOL_ROUNDS is reached)
-      4. Return the final text response
-
-    Key details to get right:
-      - The assistant message must be appended BEFORE tool results
-      - Tool result messages use role="tool" with a tool_call_id field
-      - Append the assistant's message object directly (not just its content)
-      - The history format from Gradio: list of [user_message, assistant_message] pairs
-
-    Before writing code, complete specs/agent-loop-spec.md.
+    Builds a messages list from history, calls the LLM, dispatches tool calls,
+    and repeats until the LLM returns a final text response or MAX_TOOL_ROUNDS is reached.
     """
-    return "🌱 Agent not yet implemented. Complete Milestone 2 to activate the Plant Advisor."
+    # 1. Build the messages list
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    # Append conversation history (Gradio format: list of [user_msg, assistant_msg] pairs)
+    for user_turn, assistant_turn in history:
+        messages.append({"role": "user", "content": user_turn})
+        if assistant_turn:
+            messages.append({"role": "assistant", "content": assistant_turn})
+
+    # Append the new user message
+    messages.append({"role": "user", "content": user_message})
+
+    # 2. Agent loop
+    for round_num in range(MAX_TOOL_ROUNDS):
+        response = _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            tools=TOOL_DEFINITIONS,
+            tool_choice="auto",
+        )
+
+        assistant_message = response.choices[0].message
+
+        # No tool calls — we have the final answer
+        if not assistant_message.tool_calls:
+            return assistant_message.content or ""
+
+        # 3. Append the assistant message (with tool_calls) BEFORE tool results
+        messages.append(assistant_message)
+
+        # 4. Execute each tool call and append results
+        for tool_call in assistant_message.tool_calls:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+            result_str = dispatch_tool(tool_name, tool_args)
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_str,
+            })
+
+    # MAX_TOOL_ROUNDS reached — do a final call without tools to get a text response
+    print(f"  ⚠ MAX_TOOL_ROUNDS ({MAX_TOOL_ROUNDS}) reached — forcing final response")
+    response = _client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+    )
+    return response.choices[0].message.content or "I wasn't able to generate a complete response."

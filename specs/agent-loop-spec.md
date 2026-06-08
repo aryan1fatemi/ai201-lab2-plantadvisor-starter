@@ -119,45 +119,82 @@ for tool_call in assistant_message.tool_calls:
 
 ### Loop termination conditions
 
-*The loop should stop when: (a) the LLM returns a response with no tool calls, OR (b) the MAX_TOOL_ROUNDS limit is reached. Describe how you will detect each condition and what you will return in each case.*
+The loop runs inside a `for round_num in range(MAX_TOOL_ROUNDS)` block.
+
+**Condition (a) — no tool calls:** After each LLM call, check `assistant_message.tool_calls`.
+If it is falsy (None or empty list), the LLM has produced a final answer. Return
+`assistant_message.content` immediately from inside the loop.
+
+**Condition (b) — MAX_TOOL_ROUNDS reached:** When the for loop exhausts all rounds
+without hitting a no-tool-calls response, execution falls through to code after the loop.
+At that point, make one final LLM call *without* the `tools` parameter — this forces the
+model to generate a text response from whatever context has been accumulated. Return
+that response's content. This prevents the function from returning an empty string or
+raising an exception when the safety limit is hit.
 
 ```
-[your answer here]
+for round_num in range(MAX_TOOL_ROUNDS):
+    call LLM
+    if no tool_calls → return assistant_message.content   # exit condition (a)
+    append assistant message + tool results to messages
+
+# only reached if all MAX_TOOL_ROUNDS were consumed
+final_response = call LLM without tools
+return final_response.choices[0].message.content          # exit condition (b)
 ```
 
 ---
 
 ### Extracting the final text response
 
-*Once the loop exits because there are no more tool calls, how do you extract the text content from the response object? What field holds the string you should return?*
+The text content lives at `response.choices[0].message.content`. Specifically:
 
+- `response.choices` — list of completion choices (always index 0 for non-streaming)
+- `.message` — the assistant message object
+- `.content` — the string text of the response (is `None` when the message only contains
+  tool_calls, so only read it after confirming tool_calls is falsy)
+
+```python
+return response.choices[0].message.content or ""
 ```
-[your answer here]
-```
+
+The `or ""` guards against a `None` content field, ensuring the function always returns
+a string as required by the output contract.
 
 ---
 
 ## Implementation Notes
 
-*Fill this in after implementing and testing.*
-
 **Trace of a working agent turn (what tools were called and in what order):**
 
 ```
 Query: "How should I care for my calathea?"
-Round 1 tool call: [tool name, args]
-Round 2 tool call: [tool name, args] (if any)
-Final response: [brief description]
+Round 1 tool call: lookup_plant({"plant_name": "calathea"})
+  → returns found=True with full calathea care dict
+Round 2 tool call: get_seasonal_conditions({})
+  → returns summer season data with detected_season=True
+Final response: Combines calathea-specific care requirements with summer adjustments
+  (e.g., increase humidity as indoor AC dries the air, water consistently, keep out
+  of direct sun, maintain humidity above 50%).
 ```
 
 **What happens when you ask about a plant that isn't in the database?**
 
 ```
-[describe the behavior you observed]
+lookup_plant returns {"found": False, "name": "string of pearls", "message": "..."}
+The LLM reads the not-found message, which explicitly instructs it not to invent data.
+The agent acknowledges the plant isn't in its database, then offers general guidance
+based on plant type — string of pearls is a trailing succulent, so it gets general
+succulent advice (infrequent deep watering, bright light, well-draining soil) clearly
+framed as general knowledge rather than database-sourced data.
 ```
 
 **One thing about the tool call API that surprised you:**
 
 ```
-[your answer here]
+The assistant message containing tool_calls must be appended to the messages list as
+a message object (not just its content string) before any tool results. This is because
+the tool result messages reference the tool_call_id fields that live inside that assistant
+message — the API needs both present and in order to reconstruct the call/result linkage.
+Trying to pass tool results without the preceding assistant message causes an API error.
 ```

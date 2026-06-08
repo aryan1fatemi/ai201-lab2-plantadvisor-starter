@@ -67,41 +67,69 @@ likely match for clean user input. Aliases are the broadest net, so they go last
 
 #### Alias matching approach
 
-*Aliases are stored as a list of strings. How will you check if the normalized input matches any alias in the list? Write your approach in pseudocode or plain English.*
+For each plant in the database, convert every alias to lowercase and compare against
+the normalized input. This is done with a list comprehension:
 
 ```
-[your answer here]
+for each plant in _plant_db:
+    if normalized in [alias.lower() for alias in plant["aliases"]]:
+        return found result
+
+This is O(n * a) where n is the number of plants and a is the average number of aliases
+per plant. With 15 plants and ~4 aliases each, this is effectively constant. If the
+database grew to thousands of plants, a flat alias-to-key dict built once at module
+load would make lookups O(1):
+
+  _alias_index = {
+      alias.lower(): key
+      for key, plant in _plant_db.items()
+      for alias in plant["aliases"]
+  }
 ```
 
 ---
 
 #### Not-found message
 
-*When a plant isn't found, the agent will read your message and use it to decide what to tell the user. Write the exact string you'll return — make it useful to the agent, not just to a human reading logs.*
+When a plant isn't found, the agent will read your message and use it to decide what to tell the user:
 
 ```
-[your answer here]
+"No plant matching '{plant_name}' was found in the database. The database contains
+common houseplants like pothos, monstera, snake plant, ZZ plant, peace lily, aloe vera,
+philodendron, calathea, orchid, fiddle leaf fig, rubber plant, boston fern, spider plant,
+chinese evergreen, and succulents. Acknowledge that this specific plant is not in the
+database. Offer general care advice based on the plant type (tropical, succulent, fern,
+etc.) if you can infer it from the name — but do not invent specific data as if it came
+from the database."
 ```
+
+The message is written to the LLM, not to the user. It gives the LLM both the factual
+result (not found) and an explicit behavioral instruction (don't fabricate, but do offer
+general guidance). This is more useful than a bare "not found" string.
 
 ---
 
 #### Implementation Notes
 
-*Fill this in after implementing and running the app.*
-
 **Test: does `"devil's ivy"` return the pothos entry?**
 ```
-[yes / no — if no, describe what happened]
+Yes. "devil's ivy" is listed in pothos's aliases array. After normalizing the input to
+lowercase and stripping whitespace, the alias match loop finds it and returns
+{"found": True, "plant": <pothos dict>}.
 ```
 
 **Test: does `"SNAKE PLANT"` return the snake plant entry?**
 ```
-[yes / no — if no, describe what happened]
+Yes. "SNAKE PLANT".strip().lower() → "snake plant", which matches the display_name
+"Snake Plant".lower() == "snake plant" in the display name pass.
 ```
 
 **One edge case you discovered while implementing:**
 ```
-[your answer here]
+The slug keys in _plant_db use underscores (e.g., "snake_plant", "zz_plant"), but users
+and the LLM typically say "snake plant" or "zz plant" with a space. These do NOT match
+on the direct key pass, so the display name pass is what catches them. This makes the
+display name check more important in practice than the key check for most user inputs.
 ```
 
 ---
@@ -179,16 +207,15 @@ The full season dict from `_season_data`, plus a `detected_season` boolean. Exam
 
 #### Implementation Notes
 
-*Fill this in after testing.*
-
 **Test: does calling with `season=None` return the correct season for the current month?**
 ```
-Current month: [month]
-Expected season: [season]
-Returned season: [season]
+Current month: June (month 6)
+Expected season: summer
+Returned season: summer ✓ — detected_season=True confirms auto-detection was used
 ```
 
 **Test: does calling with `season="winter"` return winter data regardless of the current month?**
 ```
-[yes / no]
+Yes. Passing season="winter" skips auto-detection entirely and returns the winter entry
+from _season_data with detected_season=False.
 ```
